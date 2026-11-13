@@ -1,0 +1,11 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ratings
+  namespace: bookinfo
+spec:
+  host: ratings
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        useSourceIp: true

@@ -1,218 +1,158 @@
-# Istio Service Mesh: Traffic Routing & Load Balancing Policies on Kubernetes (Minikube)
+# Istio Service Mesh: Traffic Routing, Load Balancing & Resilience Lab
 
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.28%2B-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
-[![Istio](https://img.shields.io/badge/Istio-v1.20%2B-466BB0?logo=istio&logoColor=white)](https://istio.io/)
-[![Minikube](https://img.shields.io/badge/Minikube-Local_Cluster-13B5EA?logo=kubernetes&logoColor=white)](https://minikube.sigs.k8s.io/)
-[![Kiali](https://img.shields.io/badge/Observability-Kiali-5A626A)](https://kiali.io/)
-[![Jaeger](https://img.shields.io/badge/Tracing-Jaeger-60D0E4?logo=jaeger&logoColor=white)](https://www.jaegertracing.io/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-Minikube-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Istio](https://img.shields.io/badge/Istio-Service_Mesh-466BB0?logo=istio&logoColor=white)](https://istio.io/)
 [![Grafana](https://img.shields.io/badge/Metrics-Grafana-F46800?logo=grafana&logoColor=white)](https://grafana.com/)
+[![Jaeger](https://img.shields.io/badge/Tracing-Jaeger-60D0E4?logo=jaeger&logoColor=white)](https://www.jaegertracing.io/)
+[![Kiali](https://img.shields.io/badge/Topology-Kiali-5A626A)](https://kiali.io/)
 
-An end-to-end hands-on project demonstrating advanced Layer 7 (L7) traffic routing and load balancing policies using **Istio Service Mesh** on a **Minikube** cluster with the canonical **Bookinfo** microservices application.
+A comprehensive hands-on engineering project exploring **Layer 7 (L7) Traffic Routing**, **Load Balancing Policies**, and **Resilience under Fault Injection** using **Istio Service Mesh** on **Kubernetes (Minikube)** with the canonical **Bookinfo** microservices application.
 
-We configured and benchmarked 3 core Istio `DestinationRule` load balancing algorithms on a multi-replica microservice (`ratings-v1` scaled to 3 pods) and analyzed traffic distribution in real time using **Kiali**, **Jaeger**, and **Grafana**:
-1. **Round Robin** (`ROUND_ROBIN`)
-2. **Least Connections** (`LEAST_CONN`)
-3. **Consistent Hashing** (`CONSISTENT_HASH` with custom HTTP headers)
+The target service under evaluation is the `ratings` microservice (scaled to 3 and 4 pods), instrumented with full observability across **Grafana** (metrics), **Jaeger** (distributed tracing), and **Kiali** (service mesh graph).
 
 ---
 
-## 🏗️ Architecture & Topology
+## 🔬 Experimental Scenarios Overview
 
-Traffic enters the cluster through the **Istio Ingress Gateway**, flows to `productpage`, calls `reviews`, and subsequently fans out to the `ratings` microservice. Envoy sidecar proxies dynamically manage request dispatching based on our declared `DestinationRule` policies without altering application source code.
+| # | Experiment | Target Focus | Concurrency & Faults | Observability Tool | Key Finding |
+|---|---|---|---|---|---|
+| **1** | **Ratings Replication** | 3 Replicas | Default traffic | Kiali | Native Envoy Round Robin balances traffic equally (~33% per pod). |
+| **2** | **Round Robin DR** | `ROUND_ROBIN` | 20 Threads | Grafana | Perfectly overlapping throughput curves across all pods. |
+| **3** | **Least Connections DR** | `LEAST_CONN` | 20 Threads | Grafana | Behaves similarly to Round Robin on ultra-fast sub-millisecond requests. |
+| **4** | **VirtualService Weights & Faults** | 4 Pods / Weights | Weight-based routing + Faults | Kiali / Grafana | VirtualService weight routing executes first; DR load balancing distributes within subsets. |
+| **5** | **5s Fault Injection Stress** | 5s Delay | 200 Threads | Grafana / Kiali | Under severe lag, `LEAST_CONN` dynamically routes traffic away from congested pods. |
+| **6** | **Distributed Tracing** | 3 Pods (5s Delay) | 30 Threads | Jaeger | Visualized 5s cascade spans; verified Round Robin vs Least Connections avoidance. |
+| **7** | **Consistent Hashing & Header Loss** | `CONSISTENT_HASH` (`x-user`) | Header variation | Kiali / Pod logs | **Discovery:** Headers dropped by `productpage` fallback to RR; direct calls achieve strict stickiness. |
+
+---
+
+## 🏗️ Architecture & Traffic Flow
 
 ```mermaid
-flowchart LR
-    Client([Client / curl]) -->|HTTP Port 8080| IG[Istio Ingress Gateway]
-    IG -->|/productpage| PP["productpage-v1 (Envoy Sidecar)"]
+flowchart TD
+    Client([Client / Multi-threaded curl]) -->|Port 8080| IG[Istio Ingress Gateway]
+    IG --> PP["productpage-v1 (Envoy Sidecar)"]
     PP --> Det["details-v1"]
-    PP --> Rev["reviews-v2 / v3"]
-    Rev -->|L7 Load Balancing Policy| RatingsService["ratings Service (ClusterIP)"]
+    PP --> Rev["reviews-v1 / v2 / v3"]
+    Rev -->|L7 DR Policy & Faults| RatingsService["ratings ClusterIP Service"]
 
-    subgraph Load_Balancing_Target["Target: ratings-v1 (3 Replicas)"]
-        RatingsService -->|LB Policy| R1["ratings-v1 (Pod A)"]
-        RatingsService -->|LB Policy| R2["ratings-v1 (Pod B)"]
-        RatingsService -->|LB Policy| R3["ratings-v1 (Pod C)"]
+    subgraph Ratings_Cluster["Target Workload: ratings-v1 (Scaled Replicas)"]
+        RatingsService --> PodA["ratings Pod 1"]
+        RatingsService --> PodB["ratings Pod 2"]
+        RatingsService --> PodC["ratings Pod 3"]
+        RatingsService -.-> PodD["ratings Pod 4 (Exp 4)"]
     end
 
-    subgraph Telemetry["Observability Stack"]
-        Kiali["Kiali (Service Topology)"]
-        Jaeger["Jaeger (Distributed Tracing)"]
-        Grafana["Grafana (Prometheus Metrics)"]
+    subgraph Observability_Stack["Telemetry & Monitoring Stack"]
+        Grafana["Grafana (Prometheus RPS & Connection Metrics)"]
+        Jaeger["Jaeger (Distributed Spans & Latency Cascades)"]
+        Kiali["Kiali (Service Topology Graph)"]
     end
 
-    PP -.-> Telemetry
-    Rev -.-> Telemetry
-    Load_Balancing_Target -.-> Telemetry
+    Ratings_Cluster -.-> Observability_Stack
 ```
 
 ---
 
-## 📂 Repository Structure
+## 📂 Repository Organization
 
 ```text
 .
-├── README.md                               # Project documentation
+├── README.md                                       # Main documentation
+├── .gitignore
+├── docs/
+│   ├── REPORT_SCENARIOS.md                         # Detailed scientific report (French)
+│   └── images/                                     # Experiment screenshots organized by scenario
+│       ├── exp1-ratings-replication/               # Place screenshots for Experiment 1
+│       ├── exp2-round-robin-grafana-20threads/     # Place Grafana screenshots for Experiment 2
+│       ├── exp3-least-connection-grafana-20threads/# Place Grafana screenshots for Experiment 3
+│       ├── exp4-virtualservice-weights-fault/      # Place screenshots for Experiment 4
+│       ├── exp5-fault-injection-5s-200threads/     # Place screenshots for Experiment 5
+│       ├── exp6-jaeger-tracing-5s-30threads/       # Place Jaeger traces for Experiment 6
+│       └── exp7-consistent-hashing-header/         # Place Kiali & stickiness logs for Experiment 7
 ├── manifests/
-│   ├── bookinfo.yaml                       # Bookinfo microservices deployment
-│   ├── bookinfo-gateway.yaml               # Gateway and VirtualService for ingress traffic
-│   ├── ratings-scale-replicas.yaml         # Replica scale definition (3 pods)
-│   └── destination-rules/
-│       ├── dr-round-robin.yaml             # Policy 1: Round Robin DestinationRule
-│       ├── dr-least-conn.yaml              # Policy 2: Least Connections DestinationRule
-│       ├── dr-consistent-hash-header.yaml  # Policy 3: Consistent Hashing (Header: x-user)
-│       └── dr-consistent-hash-ip.yaml      # Policy 3 (Variant): Source-IP hashing
-├── telemetry/
-│   └── tracing-telemetry.yaml              # Istio Telemetry CRD for Jaeger/Zipkin tracing
-├── scripts/
-│   ├── deploy.sh                           # One-shot cluster bootstrap and app deployment
-│   ├── expose_services.sh                  # Helper script for port-forwarding all dashboards
-│   └── generate_traffic.sh                 # Traffic generation script (Continuous, Header, Burst)
-└── docs/
-    ├── REPORT.md                           # Detailed French experimental report
-    └── images/                             # High-resolution Kiali experiment screenshots
-        ├── round_robin_kiali.png
-        ├── least_conn_kiali.png
-        ├── consistent_hash_kiali_header.png
-        └── consistent_hash_kiali_graph.png
+│   ├── 01-base/
+│   │   ├── bookinfo.yaml                           # Bookinfo deployment
+│   │   ├── bookinfo-gateway.yaml                   # Gateway & VirtualService
+│   │   ├── ratings-3-replicas.yaml                 # 3-pod scale definition
+│   │   └── ratings-4-pods.yaml                     # 4-pod scale definition
+│   ├── 02-destination-rules/
+│   │   ├── dr-ratings-round-robin.yaml             # ROUND_ROBIN policy
+│   │   ├── dr-ratings-least-conn.yaml              # LEAST_CONN policy
+│   │   ├── dr-ratings-consistent-hash.yaml         # CONSISTENT_HASH on x-user header
+│   │   └── dr-ratings-consistent-hash-ip.yaml      # CONSISTENT_HASH on source IP
+│   ├── 03-virtual-services/
+│   │   ├── vs-ratings-weights.yaml                 # Weight-based split (75/25)
+│   │   └── vs-reviews-weights.yaml                 # Reviews subset weights (34/33/33)
+│   ├── 04-fault-injection/
+│   │   ├── envoyfilter-ratings-delay-5s.yaml       # Injected 5s delay on slow pod
+│   │   └── vs-ratings-fault-delay-5s.yaml          # VirtualService native fault delay
+│   └── 05-telemetry/
+│       └── tracing-telemetry.yaml                  # 100% trace sampling for Jaeger
+└── scripts/
+    ├── expose_dashboards.sh                        # Port-forward tunnels (Grafana, Jaeger, Kiali, Ingress)
+    ├── run_load_test.sh                            # Multi-threaded load runner (20 / 30 / 200 threads)
+    ├── test_consistent_hash.sh                     # Consistent hashing validator (productpage vs direct)
+    └── apply_experiment.sh                         # One-click scenario switcher (1 to 7)
 ```
 
 ---
 
-## ⚡ Quick Start & Reproduction Guide
+## 🚀 Quick Execution Guide
 
-### Prerequisites
-* **Minikube** (v1.30+)
-* **kubectl**
-* **istioctl** (v1.20+)
-
-### 1. Start Cluster & Install Istio
+### 1. Launch Dashboards
+Open a dedicated terminal window:
 ```bash
-# Start Minikube with sufficient resources
-minikube start --cpus=4 --memory=8192
-
-# Install Istio with the demo profile (includes Kiali, Jaeger, Prometheus, Grafana)
-istioctl install --set profile=demo -y
-
-# Enable automatic Envoy sidecar injection on the target namespace
-kubectl create namespace bookinfo
-kubectl label namespace bookinfo istio-injection=enabled
+./scripts/expose_dashboards.sh
 ```
-
-### 2. Deploy Bookinfo & Scale Target Pods
-```bash
-# Deploy microservices and gateway
-kubectl apply -n bookinfo -f manifests/bookinfo.yaml
-kubectl apply -n bookinfo -f manifests/bookinfo-gateway.yaml
-
-# Enable mesh distributed tracing (Zipkin / Jaeger)
-kubectl apply -f telemetry/tracing-telemetry.yaml
-
-# Scale the ratings service to 3 replicas for load balancing tests
-kubectl scale deployment ratings-v1 -n bookinfo --replicas=3
-
-# Verify rollout status
-kubectl rollout status deployment/ratings-v1 -n bookinfo
-```
-
-### 3. Expose Services & Dashboards
-Run the pre-configured port-forwarding script in a separate terminal:
-```bash
-./scripts/expose_services.sh
-```
-Access the endpoints in your browser:
-* **Product Page (App):** [http://localhost:8080/productpage](http://localhost:8080/productpage)
-* **Kiali Console:** [http://localhost:20001/kiali](http://localhost:20001/kiali)
+Endpoints:
+* **Grafana:** [http://localhost:3000](http://localhost:3000)
 * **Jaeger Tracing:** [http://localhost:16686](http://localhost:16686)
-* **Grafana Dashboards:** [http://localhost:3000](http://localhost:3000)
+* **Kiali Console:** [http://localhost:20001/kiali](http://localhost:20001/kiali)
+* **Bookinfo Ingress:** [http://localhost:8080/productpage](http://localhost:8080/productpage)
 
----
-
-## 🧪 Experiments & Load Balancing Policies
-
-### Policy 1: Round Robin (`ROUND_ROBIN`)
-The default algorithm in Envoy. It sequentially cycles through all healthy backend instances ($A \to B \to C \to A \dots$).
-
-* **Apply Manifest:**
-  ```bash
-  kubectl apply -f manifests/destination-rules/dr-round-robin.yaml
-  ```
-* **Traffic Simulation:**
-  ```bash
-  ./scripts/generate_traffic.sh continuous
-  ```
-* **Observed Result:**
-  Kiali shows an even traffic split of approximately **~33.3%** across each of the 3 `ratings-v1` pods.
-
-![Round Robin Kiali Distribution](docs/images/round_robin_kiali.png)
-
----
-
-### Policy 2: Least Connections (`LEAST_CONN`)
-Envoy routes incoming requests to the backend pod currently handling the fewest active connections. This is particularly effective for workloads with variable processing times or long-lived connections.
-
-* **Apply Manifest:**
-  ```bash
-  kubectl apply -f manifests/destination-rules/dr-least-conn.yaml
-  ```
-* **Traffic Simulation:**
-  ```bash
-  ./scripts/generate_traffic.sh burst 150
-  ```
-* **Observed Result:**
-  Because Bookinfo requests are short-lived HTTP calls, traffic distribution closely mirrors Round Robin in steady state, but actively adapts when latency or burst spikes occur.
-
-![Least Connections Kiali Distribution](docs/images/least_conn_kiali.png)
-
----
-
-### Policy 3: Consistent Hashing (`CONSISTENT_HASH`)
-Guarantees session affinity (stickiness) by hashing a designated request attribute (such as an HTTP Header, Cookie, or Client Source IP). All requests sharing the same key hash to the **exact same backend pod**.
-
-* **Apply Manifest (HTTP Header `x-user`):**
-  ```bash
-  kubectl apply -f manifests/destination-rules/dr-consistent-hash-header.yaml
-  ```
-* **Test Stickiness:**
-  ```bash
-  ./scripts/generate_traffic.sh header 100
-  ```
-* **Observed Result:**
-  * Requests with `x-user: user1` are consistently directed to **Replica #1**.
-  * Requests with `x-user: user2` are consistently directed to **Replica #2**.
-  * The session stickiness persists deterministically across thousands of invocations.
-
-![Consistent Hashing Kiali Graph](docs/images/consistent_hash_kiali_graph.png)
-
----
-
-## 📊 Policy Comparison Matrix
-
-| Load Balancing Policy | Envoy Config | Best Use Case | Traffic Distribution | Session Affinity |
-| :--- | :--- | :--- | :--- | :--- |
-| **Round Robin** | `simple: ROUND_ROBIN` | Stateless, homogeneous workloads with uniform latency. | Exactly equal (~33% per pod) | ❌ None |
-| **Least Connections** | `simple: LEAST_CONN` | Heterogeneous, compute-heavy, or variable-latency workloads. | Dynamic balance based on active load | ❌ None |
-| **Consistent Hashing** | `consistentHash: { httpHeaderName: x-user }` | Stateful services, local in-memory caches, sticky user sessions. | Deterministic (100% of given key to 1 pod) | ✅ Strict (Key-based) |
-
----
-
-## 🔍 Observability Stack Overview
-
-* **Kiali**: Visualizes real-time request rates, topology graphs, and percentages across individual service workloads.
-* **Jaeger**: Traces end-to-end HTTP spans across microservices (`productpage` $\to$ `reviews` $\to$ `ratings`), measuring latency per hop and verifying header propagation.
-* **Grafana**: Provides Istio Service and Workload dashboards displaying request volume, P50/P90/P99 latency, and Envoy connection pool health.
-
----
-
-## 🧹 Cleanup
-To tear down the deployed resources:
+### 2. Switching Between Scenarios (1 to 7)
+Use the helper script [`scripts/apply_experiment.sh`](file:///Users/inesbenyghzer/.gemini/antigravity/scratch/istio-bookinfo-loadbalancing/scripts/apply_experiment.sh):
 ```bash
-kubectl delete namespace bookinfo
-istioctl uninstall --purge -y
-minikube stop
+# Activate Experiment 2 (Round Robin DestinationRule)
+./scripts/apply_experiment.sh 2
+
+# Activate Experiment 5 (5s Fault Injection)
+./scripts/apply_experiment.sh 5
+
+# Activate Experiment 7 (Consistent Hashing)
+./scripts/apply_experiment.sh 7
+```
+
+### 3. Generating Concurrent Load
+Run multi-threaded benchmarks using [`scripts/run_load_test.sh`](file:///Users/inesbenyghzer/.gemini/antigravity/scratch/istio-bookinfo-loadbalancing/scripts/run_load_test.sh):
+```bash
+# Syntax: ./run_load_test.sh <THREADS> <DURATION_SECONDS>
+./scripts/run_load_test.sh 20 30    # 20 threads for 30 seconds (Experiments 2 & 3)
+./scripts/run_load_test.sh 30 45    # 30 threads for Jaeger inspection (Experiment 6)
+./scripts/run_load_test.sh 200 60   # 200 threads stress test (Experiment 5)
+```
+
+### 4. Running the Consistent Hashing Test
+Execute the test script proving the header loss discovery:
+```bash
+./scripts/test_consistent_hash.sh
 ```
 
 ---
 
-## 📄 License & Credits
-* Original application: [Istio Bookinfo Sample Application](https://istio.io/latest/docs/examples/bookinfo/)
-* Tested and documented by [Ines Ben Yghzer](https://github.com/)
+## 💡 Key Architectural Insights
+
+1. **Weight Routing vs Load Balancing**:
+   `VirtualService` traffic routing (e.g. 75%/25% subset weights) operates at the routing level *before* the `DestinationRule`. The `DestinationRule` load balancer (`ROUND_ROBIN` or `LEAST_CONN`) then distributes requests among the pods backing each subset.
+
+2. **Resilience with Least Connections**:
+   When a pod experiences severe delay (5s fault injection), `ROUND_ROBIN` continues blindly sending 33% of requests to the slow pod. `LEAST_CONN` senses the accumulation of open connections and automatically shunts subsequent requests to healthy pods.
+
+3. **HTTP Header Propagation in Service Mesh**:
+   Layer 7 routing features like `Consistent Hashing` on HTTP headers (`x-user`) depend entirely on downstream microservices preserving and forwarding those headers. When `productpage` drops custom headers, Envoy falls back to default Round Robin. Calling `ratings` directly verifies that the Envoy configuration is functioning as designed.
+
+---
+
+## 📖 Detailed Report
+For in-depth mathematical descriptions, step-by-step observations, and Grafana/Jaeger analyses, see [`docs/REPORT_SCENARIOS.md`](docs/REPORT_SCENARIOS.md).
