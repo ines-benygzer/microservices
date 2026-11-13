@@ -14,19 +14,19 @@ The target service under evaluation is the `ratings` microservice (scaled to 3 a
 
 ## 🔬 Experimental Scenarios Overview
 
-| # | Experiment | Target Focus | Concurrency & Faults | Observability Tool | Key Finding |
-|---|---|---|---|---|---|
-| **1** | **Ratings Replication** | 3 Replicas | Default traffic | Kiali | Native Envoy Round Robin balances traffic equally (~33% per pod). |
-| **2** | **Round Robin DR** | `ROUND_ROBIN` | 20 Threads | Grafana | Perfectly overlapping throughput curves across all pods. |
-| **3** | **Least Connections DR** | `LEAST_CONN` | 20 Threads | Grafana | Behaves similarly to Round Robin on ultra-fast sub-millisecond requests. |
-| **4** | **VirtualService Weights & Faults** | 4 Pods / Weights | Weight-based routing + Faults | Kiali / Grafana | VirtualService weight routing executes first; DR load balancing distributes within subsets. |
-| **5** | **5s Fault Injection Stress** | 5s Delay | 200 Threads | Grafana / Kiali | Under severe lag, `LEAST_CONN` dynamically routes traffic away from congested pods. |
-| **6** | **Distributed Tracing** | 3 Pods (5s Delay) | 30 Threads | Jaeger | Visualized 5s cascade spans; verified Round Robin vs Least Connections avoidance. |
-| **7** | **Consistent Hashing & Header Loss** | `CONSISTENT_HASH` (`x-user`) | Header variation | Kiali / Pod logs | **Discovery:** Headers dropped by `productpage` fallback to RR; direct calls achieve strict stickiness. |
+| #     | Experiment                           | Target Focus                 | Concurrency & Faults          | Observability Tool | Key Finding                                                                                             |
+| ----- | ------------------------------------ | ---------------------------- | ----------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| **1** | **Ratings Replication**              | 3 Replicas                   | Default traffic               | Kiali              | Native Envoy Round Robin balances traffic equally (~33% per pod).                                       |
+| **2** | **Round Robin DR**                   | `ROUND_ROBIN`                | 20 Threads                    | Grafana            | Perfectly overlapping throughput curves across all pods.                                                |
+| **3** | **Least Connections DR**             | `LEAST_CONN`                 | 20 Threads                    | Grafana            | Behaves similarly to Round Robin on ultra-fast sub-millisecond requests.                                |
+| **4** | **VirtualService Weights & Faults**  | 4 Pods / Weights             | Weight-based routing + Faults | Kiali / Grafana    | VirtualService weight routing executes first; DR load balancing distributes within subsets.             |
+| **5** | **5s Fault Injection Stress**        | 5s Delay                     | 200 Threads                   | Grafana / Kiali    | Under severe lag, `LEAST_CONN` dynamically routes traffic away from congested pods.                     |
+| **6** | **Distributed Tracing**              | 3 Pods (5s Delay)            | 30 Threads                    | Jaeger             | Visualized 5s cascade spans; verified Round Robin vs Least Connections avoidance.                       |
+| **7** | **Consistent Hashing & Header Loss** | `CONSISTENT_HASH` (`x-user`) | Header variation              | Kiali / Pod logs   | **Discovery:** Headers dropped by `productpage` fallback to RR; direct calls achieve strict stickiness. |
 
 ---
 
-## 🏗️ Architecture & Traffic Flow
+## Architecture & Traffic Flow
 
 ```mermaid
 flowchart TD
@@ -54,22 +54,21 @@ flowchart TD
 
 ---
 
-## 📂 Repository Organization
+## Repository Organization
 
 ```text
 .
 ├── README.md                                       # Main documentation
 ├── .gitignore
-├── docs/
-│   ├── REPORT_SCENARIOS.md                         # Detailed scientific report (French)
+│   ├── REPORT_SCENARIOS.md                         # Detailed scientific report
 │   └── images/                                     # Experiment screenshots organized by scenario
-│       ├── exp1-ratings-replication/               # Place screenshots for Experiment 1
-│       ├── exp2-round-robin-grafana-20threads/     # Place Grafana screenshots for Experiment 2
-│       ├── exp3-least-connection-grafana-20threads/# Place Grafana screenshots for Experiment 3
-│       ├── exp4-virtualservice-weights-fault/      # Place screenshots for Experiment 4
-│       ├── exp5-fault-injection-5s-200threads/     # Place screenshots for Experiment 5
-│       ├── exp6-jaeger-tracing-5s-30threads/       # Place Jaeger traces for Experiment 6
-│       └── exp7-consistent-hashing-header/         # Place Kiali & stickiness logs for Experiment 7
+│       ├── exp1-ratings-replication/
+│       ├── exp2-round-robin-grafana-20threads/
+│       ├── exp3-least-connection-grafana-20threads/
+│       ├── exp4-virtualservice-weights-fault/
+│       ├── exp5-fault-injection-5s-200threads/
+│       ├── exp6-jaeger-tracing-5s-30threads/
+│       └── exp7-consistent-hashing-header/
 ├── manifests/
 │   ├── 01-base/
 │   │   ├── bookinfo.yaml                           # Bookinfo deployment
@@ -98,21 +97,27 @@ flowchart TD
 
 ---
 
-## 🚀 Quick Execution Guide
+## Quick Execution Guide
 
 ### 1. Launch Dashboards
+
 Open a dedicated terminal window:
+
 ```bash
 ./scripts/expose_dashboards.sh
 ```
+
 Endpoints:
-* **Grafana:** [http://localhost:3000](http://localhost:3000)
-* **Jaeger Tracing:** [http://localhost:16686](http://localhost:16686)
-* **Kiali Console:** [http://localhost:20001/kiali](http://localhost:20001/kiali)
-* **Bookinfo Ingress:** [http://localhost:8080/productpage](http://localhost:8080/productpage)
+
+- **Grafana:** [http://localhost:3000](http://localhost:3000)
+- **Jaeger Tracing:** [http://localhost:16686](http://localhost:16686)
+- **Kiali Console:** [http://localhost:20001/kiali](http://localhost:20001/kiali)
+- **Bookinfo Ingress:** [http://localhost:8080/productpage](http://localhost:8080/productpage)
 
 ### 2. Switching Between Scenarios (1 to 7)
+
 Use the helper script [`scripts/apply_experiment.sh`](file:///Users/inesbenyghzer/.gemini/antigravity/scratch/istio-bookinfo-loadbalancing/scripts/apply_experiment.sh):
+
 ```bash
 # Activate Experiment 2 (Round Robin DestinationRule)
 ./scripts/apply_experiment.sh 2
@@ -125,7 +130,9 @@ Use the helper script [`scripts/apply_experiment.sh`](file:///Users/inesbenyghze
 ```
 
 ### 3. Generating Concurrent Load
+
 Run multi-threaded benchmarks using [`scripts/run_load_test.sh`](file:///Users/inesbenyghzer/.gemini/antigravity/scratch/istio-bookinfo-loadbalancing/scripts/run_load_test.sh):
+
 ```bash
 # Syntax: ./run_load_test.sh <THREADS> <DURATION_SECONDS>
 ./scripts/run_load_test.sh 20 30    # 20 threads for 30 seconds (Experiments 2 & 3)
@@ -134,17 +141,19 @@ Run multi-threaded benchmarks using [`scripts/run_load_test.sh`](file:///Users/i
 ```
 
 ### 4. Running the Consistent Hashing Test
+
 Execute the test script proving the header loss discovery:
+
 ```bash
 ./scripts/test_consistent_hash.sh
 ```
 
 ---
 
-## 💡 Key Architectural Insights
+## Key Architectural Insights
 
 1. **Weight Routing vs Load Balancing**:
-   `VirtualService` traffic routing (e.g. 75%/25% subset weights) operates at the routing level *before* the `DestinationRule`. The `DestinationRule` load balancer (`ROUND_ROBIN` or `LEAST_CONN`) then distributes requests among the pods backing each subset.
+   `VirtualService` traffic routing (e.g. 75%/25% subset weights) operates at the routing level _before_ the `DestinationRule`. The `DestinationRule` load balancer (`ROUND_ROBIN` or `LEAST_CONN`) then distributes requests among the pods backing each subset.
 
 2. **Resilience with Least Connections**:
    When a pod experiences severe delay (5s fault injection), `ROUND_ROBIN` continues blindly sending 33% of requests to the slow pod. `LEAST_CONN` senses the accumulation of open connections and automatically shunts subsequent requests to healthy pods.
@@ -154,5 +163,6 @@ Execute the test script proving the header loss discovery:
 
 ---
 
-## 📖 Detailed Report
+## Detailed Report
+
 For in-depth mathematical descriptions, step-by-step observations, and Grafana/Jaeger analyses, see [`docs/REPORT_SCENARIOS.md`](docs/REPORT_SCENARIOS.md).
